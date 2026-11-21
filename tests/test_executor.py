@@ -36,7 +36,7 @@ defs = dg.Definitions(jobs=[parallel_job], executor=threaded_executor)
 
 
 def load_parallel_job():
-    return defs.resolve_job_def("parallel_job")
+    return defs.get_repository_def().get_job("parallel_job")
 
 
 def test_definitions_executor_runs_independent_ops_on_two_threads():
@@ -48,6 +48,29 @@ def test_definitions_executor_runs_independent_ops_on_two_threads():
             run_config=TWO_THREADS,
         )
         assert result.success
+
+
+@dg.resource
+def wide_barrier():
+    return threading.Barrier(40, timeout=15)
+
+
+@dg.job(
+    executor_def=threaded_executor,
+    resource_defs={"barrier": wide_barrier, "io_manager": dg.mem_io_manager},
+)
+def wide_parallel_job():
+    for i in range(40):
+        worker_identity.alias(f"step_{i}")()
+
+
+def test_default_has_no_executor_concurrency_limit():
+    with dg.instance_for_test() as instance:
+        result = dg.execute_job(
+            dg.reconstructable(wide_parallel_job), instance=instance
+        )
+        assert result.success
+        assert sum(event.is_step_success for event in result.all_events) == 40
 
 
 @dg.op(out=dg.DynamicOut(int))

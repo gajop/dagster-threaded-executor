@@ -1,14 +1,30 @@
 # Dagster threaded executor
 
-Run independent steps on threads in one run worker. Supports stock Dagster **1.13.31** and Python **3.11–3.14**. The Dagster pin protects against changes to its private execution APIs.
+Run independent steps on threads in one run worker. Supports stock Dagster **1.10–1.13** and Python **3.11–3.14**, subject to the Dagster release's Python requirements.
 
 ## Install
 
+In your uv project, run:
+
 ```sh
-python -m pip install https://github.com/gajop/dagster-threaded-executor/releases/download/v0.1.0/dagster_threaded_executor-0.1.0-py3-none-any.whl
+uv add 'dagster-threaded-executor @ https://github.com/gajop/dagster-threaded-executor/releases/download/v0.2.0/dagster_threaded_executor-0.2.0-py3-none-any.whl'
 ```
 
-Install wherever Dagster imports your definitions or executes runs. Set the executor once per code location. Jobs with an explicit executor keep it.
+Or add this to your existing `pyproject.toml` and run `uv sync`.
+
+```toml
+[project]
+dependencies = ["dagster-threaded-executor"]
+
+[tool.uv.sources]
+dagster-threaded-executor = { url = "https://github.com/gajop/dagster-threaded-executor/releases/download/v0.2.0/dagster_threaded_executor-0.2.0-py3-none-any.whl" }
+```
+
+With pip, pass the same wheel URL to `python -m pip install`.
+
+## Select the executor
+
+Install wherever Dagster imports your definitions or executes runs. On stock Dagster, select the custom executor once in `Definitions`. Jobs with an explicit executor keep it.
 
 ```python
 from dagster_threaded_executor import threaded_executor
@@ -16,7 +32,7 @@ from dagster_threaded_executor import threaded_executor
 defs = dg.Definitions(jobs=[my_job], executor=threaded_executor)
 ```
 
-Set the per-run thread limit in [run YAML](examples/run.yaml).
+**There is no executor concurrency limit by default.** Dagster concurrency pools still apply. For an optional per-run limit, use [run YAML](examples/run.yaml).
 
 ```yaml
 execution:
@@ -24,23 +40,39 @@ execution:
     max_concurrent: 2
 ```
 
+Or set a fixed limit on the executor in `Definitions` and omit run YAML.
+
+```python
+executor = threaded_executor.configured({"max_concurrent": 2}, name="threaded_default")
+defs = dg.Definitions(jobs=[my_job], executor=executor)
+```
+
 Shared resources and I/O managers must be thread-safe. Cancellation waits for running steps to exit.
 
-For a fixed limit, pass `threaded_executor.configured({"max_concurrent": 2}, name="threaded_default")` to `Definitions`.
+### YAML-only setup with the fork
+
+Stock Dagster run YAML configures the executor selected in `Definitions`. The [Dagster fork](https://github.com/gajop/dagster/tree/threaded-executor) can select it in `dagster.yaml` for jobs using Dagster's default executor.
+
+```yaml
+default_executor:
+  threaded: {}
+```
+
+Add `max_concurrent` under `threaded` if you want a limit.
 
 ## Run the example
 
 From a checkout, run [two independent synchronous ops](examples/definitions.py).
 
 ```sh
-dagster job execute -f examples/definitions.py -a defs -j two_waits -c examples/run.yaml
+uv run dagster job execute -f examples/definitions.py -a defs -j two_waits
 ```
 
 ## BigQuery benchmark
 
 ![Community async, threaded, and stock multiprocess compared on elapsed time and peak memory](benchmark/multiprocess-comparison.png)
 
-Each case ran 50 identical sync ops on local Linux with Python 3.13. Each op submits [one five-second server-side wait](benchmark/wait.sql) and polls job status. The queries scanned and billed zero bytes. Wall time includes startup. Peak memory sums process-tree PSS and proportional swap. The three async cases ran concurrently. [Measured results](benchmark/results.csv)
+Each case ran 50 identical sync ops on local Linux with Python 3.13 and Dagster 1.13.31. Each op submits [one five-second server-side wait](benchmark/wait.sql) and polls job status. The queries scanned and billed zero bytes. Wall time includes startup. Peak memory sums process-tree PSS and proportional swap. The three async cases ran concurrently. [Measured results](benchmark/results.csv)
 
 From a checkout, configure Google Application Default Credentials with a BigQuery project, then run:
 

@@ -9,7 +9,7 @@ from contextlib import ExitStack
 from copy import copy
 from functools import partial
 from queue import Empty, SimpleQueue
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import dagster as dg
 import dagster._check as check
@@ -44,12 +44,20 @@ if TYPE_CHECKING:
     from dagster._core.executor.init import InitExecutorContext
 
 
+def _step_dependency_options(
+    context: InProcessExecutor | PlanExecutionContext,
+) -> dict[str, Any]:
+    # Older Dagster releases use the same default dependency policy without this option.
+    config = getattr(context, "step_dependency_config", None)
+    return {"step_dependency_config": config} if config is not None else {}
+
+
 def _execution_iterator(
     job_context: PlanExecutionContext,
     execution_plan: ExecutionPlan,
     instance_concurrency_context: InstanceConcurrencyContext,
     *,
-    max_concurrent: int,
+    max_concurrent: int | None,
 ) -> Iterator[DagsterEvent]:
     check.inst_param(job_context, "pipeline_context", PlanExecutionContext)
     check.inst_param(execution_plan, "execution_plan", ExecutionPlan)
@@ -62,7 +70,7 @@ def _execution_iterator(
             retry_mode=job_context.retry_mode,
             max_concurrent=max_concurrent,
             instance_concurrency_context=instance_concurrency_context,
-            step_dependency_config=job_context.step_dependency_config,
+            **_step_dependency_options(job_context),
         ) as active_execution,
         ExitStack() as capture_stack,
     ):
@@ -109,11 +117,14 @@ def _validate_step_resources(step_context: StepExecutionContext) -> None:
 def _execute_steps_on_threads(
     job_context: PlanExecutionContext,
     active_execution: ActiveExecution,
-    max_concurrent: int,
+    max_concurrent: int | None,
 ) -> Iterator[DagsterEvent]:
     events: SimpleQueue[tuple[str, DagsterEvent | Future[None]]] = SimpleQueue()
     terminal_events: dict[str, DagsterEvent] = {}
-    pool = InheritContextThreadPoolExecutor(max_workers=max_concurrent)
+    # The pool starts threads on demand. None would select Python's default cap.
+    pool = InheritContextThreadPoolExecutor(
+        max_workers=sys.maxsize if max_concurrent is None else max_concurrent
+    )
     try:
         yield from active_execution.plan_events_iterator(job_context)
         while not active_execution.is_complete:
@@ -190,7 +201,7 @@ def _execute_plan(
     job_context: PlanExecutionContext,
     execution_plan: ExecutionPlan,
     *,
-    max_concurrent: int,
+    max_concurrent: int | None,
 ) -> Iterator[DagsterEvent]:
     with InstanceConcurrencyContext(
         job_context.instance, job_context.dagster_run
@@ -206,7 +217,7 @@ def _execute_plan(
 
 
 class _ThreadedExecutor(InProcessExecutor):
-    def __init__(self, retries: RetryMode, max_concurrent: int) -> None:
+    def __init__(self, retries: RetryMode, max_concurrent: int | None) -> None:
         super().__init__(retries=retries)
         self.max_concurrent = max_concurrent
 
@@ -225,18 +236,28 @@ class _ThreadedExecutor(InProcessExecutor):
                 instance=plan_context.instance,
                 raise_on_error=plan_context.raise_on_error,
                 output_capture=plan_context.output_capture,
-                step_dependency_config=self.step_dependency_config,
+                **_step_dependency_options(self),
             ),
         )
 
 
 @dg.executor(
     name="threaded",
-    config_schema={"max_concurrent": int, "retries": get_retries_config()},
+    config_schema={
+        "max_concurrent": dg.Field(
+            dg.Noneable(int),
+            default_value=None,
+            description="Optional limit on concurrent steps per run.",
+        ),
+        "retries": get_retries_config(),
+    },
 )
 def threaded_executor(init_context: InitExecutorContext) -> _ThreadedExecutor:
     """Execute ready steps on threads, including synchronous ops."""
     max_concurrent = init_context.executor_config["max_concurrent"]
-    check.invariant(max_concurrent > 0, "max_concurrent must be greater than zero.")
+    check.invariant(
+        max_concurrent is None or max_concurrent > 0,
+        "max_concurrent must be greater than zero if set.",
+    )
     retries = RetryMode.from_config(init_context.executor_config["retries"])
     return _ThreadedExecutor(retries, max_concurrent)
