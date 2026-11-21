@@ -1,0 +1,10 @@
+case,run_workers,ops_per_run,slots_per_run,elapsed_s,op_span_s,peak_worker_pss_mib,peak_worker_pss_plus_swap_mib,unique_op_processes,peak_process_tree_count,peak_in_flight_ops,median_op_s,median_bigquery_job_s,peak_concurrent_bigquery_jobs,bigquery_slot_ms,bigquery_bytes_billed
+one-async-sync,1,50,50,309.186,301.348,150.667,150.667,1,5,1,5.968,5.508,1,495,0
+one-threaded-50,1,50,50,11.414,8.678,190.083,190.083,1,5,50,5.898,5.482,50,533,0
+one-multiprocess-50,1,50,50,24.447,11.904,6407.152,6407.152,50,252,50,5.976,5.509,50,528,0
+one-async-sync-10,1,50,10,315.574,307.692,153.647,153.647,1,5,1,5.975,5.489,1,743,0
+one-threaded-10,1,50,10,32.691,30.338,173.48,173.48,1,5,10,5.852,5.478,10,572,0
+one-multiprocess-10,1,50,10,62.937,53.693,1575.049,1575.049,50,52,10,6.058,5.529,10,722,0
+five-async-sync,5,10,10,68.762,61.542,750.983,750.983,5,25,5,5.933,5.51,5,658,0
+five-threaded,5,10,10,12.377,6.861,757.187,757.187,5,25,50,5.937,5.49,50,700,0
+five-multiprocess,5,10,10,24.999,10.89,7235.488,7235.488,50,260,50,5.891,5.483,50,511,0

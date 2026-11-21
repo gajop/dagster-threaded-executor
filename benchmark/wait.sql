@@ -1,0 +1,8 @@
+DECLARE deadline TIMESTAMP DEFAULT TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 5 SECOND);
+DECLARE checks INT64 DEFAULT 0;
+
+WHILE CURRENT_TIMESTAMP() < deadline AND checks < 10000 DO
+  SET checks = checks + 1;
+END WHILE;
+
+ASSERT CURRENT_TIMESTAMP() >= deadline AS 'Reached iteration limit before deadline';
